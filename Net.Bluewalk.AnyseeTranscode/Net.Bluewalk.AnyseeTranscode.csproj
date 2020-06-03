@@ -13,6 +13,7 @@
     <PackageReference Include="Net.Bluewalk.DotNetEnvironmentExtensions" Version="2020.3.27.1" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="3.1.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="3.1.1" />
+    <PackageReference Include="Watson" Version="3.0.11" />
   </ItemGroup>
 
 </Project>
