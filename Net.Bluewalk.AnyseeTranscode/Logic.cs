@@ -1,25 +1,23 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Net;
-using System.Runtime.CompilerServices;
-using System.Text;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Net.Bluewalk.DotNetEnvironmentExtensions;
+using WatsonWebserver;
 
 namespace Net.Bluewalk.AnyseeTranscode
 {
     public class Logic : IHostedService
     {
         private ILogger<Logic> _logger;
-        private HttpListener httpServer;
+        private Server _httpServer;
         private Process _transcodingProc;
-        private DateTime lastAccess = DateTime.Now;
+        private DateTime _lastAccess = DateTime.Now;
         private System.Timers.Timer _tmrAutoStop;
         private readonly Config _config;
         private string _currChannel;
@@ -30,20 +28,101 @@ namespace Net.Bluewalk.AnyseeTranscode
 
             _config = (Config)typeof(Config).FromEnvironment();
 
-            httpServer = new HttpListener();
-            httpServer.Prefixes.Add($"http://*:{_config.HttpPort}/");
-            httpServer.Start();
-
             _tmrAutoStop = new System.Timers.Timer(15000);
             _tmrAutoStop.Elapsed += (sender, args) =>
             {
-                if (lastAccess < DateTime.Now.AddMinutes(-1) && _transcodingProc != null)
+                if (_lastAccess < DateTime.Now.AddMinutes(-1) && _transcodingProc != null)
                 {
                     KillTranscoding();
                 }
             };
         }
 
+        private async Task Stop(HttpContext arg)
+        {
+            KillTranscoding();
+            arg.Response.StatusCode = 200;
+            await arg.Response.Send("200 - Transcoding stopped");
+        }
+
+        private async Task GetStreams(HttpContext arg)
+        {
+            var requestFile = Path.Combine(_config.SegmentPath,
+                Path.GetFileName(arg.Request.RawUrlWithoutQuery));
+            
+            if (File.Exists(requestFile))
+            {
+                _lastAccess = DateTime.Now;
+                _logger.LogDebug("Serving {0}", requestFile);
+
+                switch (Path.GetExtension(requestFile).ToUpper())
+                {
+                    case ".M3U8":
+                        arg.Response.ContentType = "application/x-mpegURL";
+                        break;
+                    case ".TS":
+                        arg.Response.ContentType = "video/mp2t";
+                        break;
+                    default:
+                        arg.Response.ContentType = "application/octet-stream";
+                        break;
+                }
+
+                try
+                {
+                    var data = File.ReadAllBytes(requestFile);
+
+                    arg.Response.StatusCode = 200;
+                    await arg.Response.Send(data);
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, $"An error occurred accessing {requestFile}");
+                }
+            }
+            else
+            {
+                arg.Response.StatusCode = 404;
+                await arg.Response.Send("404 - File not found");
+            }
+        }
+
+        private async Task DefaultRoute(HttpContext arg)
+        {
+            arg.Response.StatusCode = 200;
+            await arg.Response.Send("Default route");
+        }
+
+        private async Task GetChannel(HttpContext arg)
+        {
+            var channel = arg.Request.RawUrlEntries.LastOrDefault();
+            if (channel == null)
+            {
+                arg.Response.StatusCode = 404;
+                await arg.Response.Send("Not found");
+                return;
+            }
+
+            if (!channel.Equals(_currChannel) || _transcodingProc == null)
+            {
+                _currChannel = channel;
+                Transcode(channel);
+            }
+
+            while (!File.Exists(Path.Combine(_config.SegmentPath, channel + ".m3u8")))
+            {
+                Thread.Sleep(1000);
+            }
+
+            _logger.LogDebug("Redirecting to transcoded M3U8 file");
+
+            arg.Response.StatusCode = 302;
+            arg.Response.Headers.Add("Location", $"{_config.UrlPrefix}/stream/{channel}.m3u8");
+            await arg.Response.Send();
+
+            _lastAccess = DateTime.Now;
+            _tmrAutoStop.Start();
+        }
 
         private void Cleanup()
         {
@@ -117,150 +196,28 @@ namespace Net.Bluewalk.AnyseeTranscode
                 _config.AnyseeUrl, channel));
         }
 
-        private void StartListening(CancellationToken cancellationToken)
-        {
-            try
-            {
-                while (httpServer.IsListening && !cancellationToken.IsCancellationRequested)
-                {
-                    ThreadPool.QueueUserWorkItem((c) =>
-                    {
-                        HttpListenerResponse response = null;
-
-                        try
-                        {
-                            var context = c as HttpListenerContext;
-
-                            // Select channel to transcode
-                            if (context.Request.Url.AbsolutePath.ToUpper().Contains("/CHANNEL"))
-                            {
-                                var channel = Regex.Match(context.Request.Url.AbsolutePath, @"\d+").Value;
-
-                                if (!channel.Equals(_currChannel) || _transcodingProc == null)
-                                {
-                                    _currChannel = channel;
-                                    Transcode(channel);
-                                }
-
-                                while (!File.Exists(Path.Combine(_config.SegmentPath, channel + ".m3u8")))
-                                {
-                                    Thread.Sleep(1000);
-                                }
-
-                                _logger.LogDebug("Redirecting to transcoded M3U8 file");
-
-                                response = context.Response;
-                                response.Redirect($"{_config.UrlPrefix}/streams/{channel}.m3u8");
-
-                                lastAccess = DateTime.Now;
-                                _tmrAutoStop.Start();
-                            }
-
-                            // Request a file
-                            else if (context.Request.Url.AbsolutePath.ToUpper().Contains("/STREAMS"))
-                            {
-                                var requestFile = Path.Combine(_config.SegmentPath,
-                                    Path.GetFileName(context.Request.Url.AbsolutePath));
-
-                                response = context.Response;
-
-                                if (File.Exists(requestFile))
-                                {
-                                    lastAccess = DateTime.Now;
-                                    _logger.LogDebug("Serving {0}", requestFile);
-
-                                    switch (Path.GetExtension(requestFile).ToUpper())
-                                    {
-                                        case ".M3U8":
-                                            response.ContentType = "application/x-mpegURL";
-                                            break;
-                                        case ".TS":
-                                            response.ContentType = "video/mp2t";
-                                            break;
-                                        default:
-                                            response.ContentType = "application/octet-stream";
-                                            break;
-                                    }
-
-                                    try
-                                    {
-                                        var data = File.ReadAllBytes(requestFile);
-
-                                        response.SendChunked = true;
-                                        response.ContentLength64 = data.Length;
-
-                                        using var s = response.OutputStream;
-                                        s.Write(data, 0, data.Length);
-                                    }
-                                    catch (Exception e)
-                                    {
-                                        _logger.LogError(e, $"An error occurred accessing {requestFile}");
-                                    }
-                                }
-                                else
-                                {
-                                    response.StatusCode = 404;
-
-                                    var buf = Encoding.UTF8.GetBytes("404 - File not found");
-                                    response.OutputStream.Write(buf, 0, buf.Length);
-                                }
-                            }
-                            
-                            // Select channel to transcode
-                            else if (context.Request.Url.AbsolutePath.ToUpper().Contains("/STOP"))
-                            {
-                                KillTranscoding();
-
-                                response = context.Response;
-
-                                var buf = Encoding.UTF8.GetBytes("200 - Transcoding stopped");
-                                response.OutputStream.Write(buf, 0, buf.Length);
-                            }
-
-                            // Default response
-                            else
-                            {
-                                response = context.Response;
-
-                                response.StatusCode = 400;
-
-                                var buf = Encoding.UTF8.GetBytes("400 - Bad request");
-                                response.OutputStream.Write(buf, 0, buf.Length);
-                            }
-                        }
-                        finally
-                        {
-                            if (response != null)
-                            {
-                                response.OutputStream.Flush();
-                                response.OutputStream.Close();
-                                response.Close();
-                            }
-                        }
-                    }, httpServer.GetContext());
-                }
-            }
-            catch (Exception e)
-            {
-                _logger.LogError(e, "Error occurred during serving HTTP");
-            }
-        }
-
         public Task StartAsync(CancellationToken cancellationToken)
         {
-            ThreadPool.QueueUserWorkItem((o) =>
+            _httpServer = new Server("127.0.0.1", _config.HttpPort, false, DefaultRoute)
             {
-                StartListening(cancellationToken);
-            });
+                AccessControl =
+                {
+                    Mode = AccessControlMode.DefaultPermit
+                }
+            };
+            _httpServer.DynamicRoutes.Add(HttpMethod.GET, new Regex("^/channel/\\d+$"), GetChannel);
+            _httpServer.DynamicRoutes.Add(HttpMethod.GET, new Regex("^/stream/*.*$"), GetStreams);
+            _httpServer.StaticRoutes.Add(HttpMethod.GET, "/stop", Stop);
+
             return Task.FromResult(true);
         }
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
             if (_transcodingProc != null)
-            {
                 KillTranscoding();
-            }
+
+            _httpServer.Dispose();
 
             return Task.FromResult(true);
         }
