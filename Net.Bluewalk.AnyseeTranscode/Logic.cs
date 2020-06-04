@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net;
-using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,7 +11,6 @@ using m3uParser.Model;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Net.Bluewalk.DotNetEnvironmentExtensions;
-using Newtonsoft.Json;
 using WatsonWebserver;
 
 namespace Net.Bluewalk.AnyseeTranscode
@@ -153,6 +150,11 @@ namespace Net.Bluewalk.AnyseeTranscode
 
             await arg.Response.SendJson(result);
         }
+        
+        private async Task Server_Stats(HttpContext arg)
+        {
+            await arg.Response.SendJson(_httpServer.Stats);
+        }
 
         #endregion
 
@@ -243,7 +245,9 @@ namespace Net.Bluewalk.AnyseeTranscode
 
         public Task StartAsync(CancellationToken cancellationToken)
         {
-            _httpServer = new Server("127.0.0.1", _config.HttpPort, false, Server_DefaultRoute)
+            _logger.LogInformation("Starting webserver");
+            _httpServer = new Server("+", _config.HttpPort, false,
+                Server_DefaultRoute)
             {
                 AccessControl =
                 {
@@ -254,6 +258,8 @@ namespace Net.Bluewalk.AnyseeTranscode
             _httpServer.DynamicRoutes.Add(HttpMethod.GET, new Regex("^/stream/*.*$"), Server_Stream);
             _httpServer.StaticRoutes.Add(HttpMethod.GET, "/stop", Server_Stop);
             _httpServer.StaticRoutes.Add(HttpMethod.GET, "/channels", Server_Channels);
+            _httpServer.StaticRoutes.Add(HttpMethod.GET, "/stats", Server_Stats);
+            _logger.LogInformation("Webserver running at port {0}", _config.HttpPort);
 
             return Task.FromResult(true);
         }
