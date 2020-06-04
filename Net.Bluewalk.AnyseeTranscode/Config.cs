@@ -10,7 +10,7 @@ namespace Net.Bluewalk.AnyseeTranscode
         [EnvironmentVariable(Name = "HTTP_PORT", Default = 8080)]
         public int HttpPort { get; set; }
 
-        [EnvironmentVariable(Name = "URL_PREFIX", Default = "http://localhost")]
+        [EnvironmentVariable(Name = "URL_PREFIX", Default = "http://localhost:8080")]
         public string UrlPrefix { get; set; }
 
         [EnvironmentVariable(Name = "FFMPEG_EXE",  Default = "ffmpeg")]
