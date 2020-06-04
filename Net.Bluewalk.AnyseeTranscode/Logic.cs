@@ -1,13 +1,19 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using m3uParser;
+using m3uParser.Model;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Net.Bluewalk.DotNetEnvironmentExtensions;
+using Newtonsoft.Json;
 using WatsonWebserver;
 
 namespace Net.Bluewalk.AnyseeTranscode
@@ -21,6 +27,7 @@ namespace Net.Bluewalk.AnyseeTranscode
         private readonly System.Timers.Timer _tmrAutoStop;
         private readonly Config _config;
         private string _currChannel;
+        private Extm3u _m3u;
 
         public Logic(ILogger<Logic> logger)
         {
@@ -41,8 +48,10 @@ namespace Net.Bluewalk.AnyseeTranscode
         {
             KillTranscoding();
 
-            arg.Response.StatusCode = 200;
-            await arg.Response.Send("200 - Transcoding stopped");
+            await arg.Response.SendJson(new
+            {
+                Stopped = true
+            });
         }
 
         private async Task Server_Stream(HttpContext arg)
@@ -82,15 +91,13 @@ namespace Net.Bluewalk.AnyseeTranscode
             }
             else
             {
-                arg.Response.StatusCode = 404;
-                await arg.Response.Send("404 - File not found");
+                await arg.Response.NotFound();
             }
         }
 
         private async Task Server_DefaultRoute(HttpContext arg)
         {
-            arg.Response.StatusCode = 200;
-            await arg.Response.Send("Default route");
+            await arg.Response.SendJson("Default route");
         }
 
         private async Task Server_Channel(HttpContext arg)
@@ -98,8 +105,7 @@ namespace Net.Bluewalk.AnyseeTranscode
             var channel = arg.Request.RawUrlEntries.LastOrDefault();
             if (channel == null)
             {
-                arg.Response.StatusCode = 404;
-                await arg.Response.Send("Not found");
+                await arg.Response.NotFound();
                 return;
             }
 
@@ -114,20 +120,40 @@ namespace Net.Bluewalk.AnyseeTranscode
 
             if (_transcodingProcess.HasExited)
             {
-                arg.Response.StatusCode = 500;
-                await arg.Response.Send("500 - Error transcoding stream");
+                await arg.Response.Error(500, "Error transcoding stream");
                 return;
             }
 
             _logger.LogDebug("Redirecting to transcoded M3U8 file");
 
-            arg.Response.StatusCode = 302;
-            arg.Response.Headers.Add("Location", $"{_config.UrlPrefix}:{_config.HttpPort}/stream/{channel}.m3u8");
-            await arg.Response.Send();
+            await arg.Response.Redirect($"{_config.UrlPrefix}/stream/{channel}.m3u8");
 
             _lastAccess = DateTime.Now;
             _tmrAutoStop.Start();
         }
+        
+        private async Task Server_Channels(HttpContext arg)
+        {
+            var result = new List<object>();
+
+            var m3u = await GetChannelM3U();
+            m3u.Medias.ToList().ForEach(m =>
+            {
+                var title = Regex.Match(m.Title.InnerTitle, @"(?<channel>[0-9]+)\(cab\)\.(?<name>[A-Za-z0-9_]+)");
+
+                result.Add(new
+                {
+                    Channel = Convert.ToInt32(title.Groups["channel"].Value ?? "-1"),
+                    Name = title.Groups["name"].Value?.Replace("_", " ").Trim(),
+                    Id = m.MediaFile.Split('/').Last(),
+                    Encrypted = m.Title.InnerTitle.EndsWith("_$"),
+                    Url = $"{_config.UrlPrefix}/channel/{m.MediaFile.Split('/').Last()}"
+                });
+            });
+
+            await arg.Response.SendJson(result);
+        }
+
         #endregion
 
         #region Transcoding logic
@@ -210,6 +236,11 @@ namespace Net.Bluewalk.AnyseeTranscode
         }
         #endregion
 
+        public async Task<Extm3u> GetChannelM3U(bool reload = false)
+        {
+            return _m3u ??= await M3U.ParseFromUrlAsync($"http://{_config.AnyseeIp}/n7_tv_chlist.m3u");
+        }
+
         public Task StartAsync(CancellationToken cancellationToken)
         {
             _httpServer = new Server("127.0.0.1", _config.HttpPort, false, Server_DefaultRoute)
@@ -222,6 +253,7 @@ namespace Net.Bluewalk.AnyseeTranscode
             _httpServer.DynamicRoutes.Add(HttpMethod.GET, new Regex("^/channel/\\d+$"), Server_Channel);
             _httpServer.DynamicRoutes.Add(HttpMethod.GET, new Regex("^/stream/*.*$"), Server_Stream);
             _httpServer.StaticRoutes.Add(HttpMethod.GET, "/stop", Server_Stop);
+            _httpServer.StaticRoutes.Add(HttpMethod.GET, "/channels", Server_Channels);
 
             return Task.FromResult(true);
         }
