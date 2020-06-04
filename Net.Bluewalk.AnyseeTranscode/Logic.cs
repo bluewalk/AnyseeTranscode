@@ -41,6 +41,7 @@ namespace Net.Bluewalk.AnyseeTranscode
         private async Task Stop(HttpContext arg)
         {
             KillTranscoding();
+
             arg.Response.StatusCode = 200;
             await arg.Response.Send("200 - Transcoding stopped");
         }
@@ -103,15 +104,20 @@ namespace Net.Bluewalk.AnyseeTranscode
                 return;
             }
 
-            if (!channel.Equals(_currChannel) || _transcodingProc == null)
+            if (!channel.Equals(_currChannel) || _transcodingProc == null || _transcodingProc.HasExited)
             {
                 _currChannel = channel;
                 Transcode(channel);
             }
 
-            while (!File.Exists(Path.Combine(_config.SegmentPath, channel + ".m3u8")))
-            {
+            while (!File.Exists(Path.Combine(_config.SegmentPath, channel + ".m3u8")) && !_transcodingProc.HasExited)
                 Thread.Sleep(1000);
+
+            if (_transcodingProc.HasExited)
+            {
+                arg.Response.StatusCode = 500;
+                await arg.Response.Send("500 - Error transcoding stream");
+                return;
             }
 
             _logger.LogDebug("Redirecting to transcoded M3U8 file");
@@ -126,10 +132,13 @@ namespace Net.Bluewalk.AnyseeTranscode
 
         private void Cleanup()
         {
+            _logger.LogInformation("Cleaning up old stream data");
+
             foreach (var f in new DirectoryInfo(_config.SegmentPath).GetFiles(string.Format("*.*")))
             {
                 try
                 {
+                    _logger.LogDebug("Deleting {0}", f.Name);
 
                     f.Delete();
                 }
@@ -141,59 +150,62 @@ namespace Net.Bluewalk.AnyseeTranscode
         {
             _tmrAutoStop.Stop();
 
-            if (_transcodingProc != null)
-            {
-                try
-                {
-                    _logger.LogDebug("Trying to kill the FFMPEG process");
-                    _transcodingProc.Kill();
-                    Thread.Sleep(2000); // Wait two seconds for the Anysee to release the channel stream
-                }
-                catch { }
-                finally
-                {
-                    _transcodingProc = null;
-
-                    Cleanup();
-                }
-            }
-        }
-
-
-        private void RunProcess(string parameters)
-        {
-            var oInfo = new ProcessStartInfo(_config.FfmpegExe, parameters)
-            {
-                WorkingDirectory = _config.SegmentPath,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false
-            };
+            if (_transcodingProc == null) return;
 
             try
             {
-                _logger.LogInformation("Starting FFMPEG with parameters: {0}", parameters);
+                _logger.LogInformation("Stop transcoding");
 
-                _transcodingProc = Process.Start(oInfo);
+                _logger.LogDebug("Trying to kill the FFMPEG process");
+                _transcodingProc.Kill();
+                Thread.Sleep(2000); // Wait two seconds for the Anysee to release the channel stream
             }
-            catch (Exception e)
+            catch { }
+            finally
             {
-                _logger.LogError(e, "Error during starting FFMPEG process");
+                _transcodingProc = null;
+                _logger.LogInformation("Transcoding stopped");
+
+                Cleanup();
             }
         }
 
-
+        
         private void Transcode(string channel)
         {
             KillTranscoding();
 
             _logger.LogInformation("Start transcoding channel {0}", channel);
 
-            //            RunProcess(String.Format("-i {0}{1} -async 1 -ss 00:00:05 -acodec libmp3lame -ac 2 -vcodec libx264 -preset superfast -tune zerolatency -threads 2 -s 720x408 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 10 -hls_wrap 15 {1}.m3u8 -segment_list_flags +live -segment_time 10",
-            //            RunProcess(String.Format("-i {0}{1} -async 1 -ss 00:00:05 -threads 0 -acodec aac -strict -2 -cutoff 15000 -ac 2 -ab 256k -vcodec libx264 -preset superfast -tune zerolatency -threads 2 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 10 -hls_wrap 15 {1}.m3u8 -segment_format mpegts -segment_list_flags +live -segment_time 10",
-            RunProcess(string.Format("-i {0}{1} -async 1 -threads 0 -acodec aac -strict -2 -cutoff 15000 -ac 2 -ab 256k -vcodec libx264 -preset ultrafast -tune zerolatency -threads 2 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 5 -hls_wrap 12 {1}.m3u8 -segment_format mpegts -segment_list_flags +live -segment_time 10",
-                _config.AnyseeUrl, channel));
+            //RunProcess(String.Format("-i {0}{1} -async 1 -ss 00:00:05 -acodec libmp3lame -ac 2 -vcodec libx264 -preset superfast -tune zerolatency -threads 2 -s 720x408 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 10 -hls_wrap 15 {1}.m3u8 -segment_list_flags +live -segment_time 10",
+            //RunProcess(String.Format("-i {0}{1} -async 1 -ss 00:00:05 -threads 0 -acodec aac -strict -2 -cutoff 15000 -ac 2 -ab 256k -vcodec libx264 -preset superfast -tune zerolatency -threads 2 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 10 -hls_wrap 15 {1}.m3u8 -segment_format mpegts -segment_list_flags +live -segment_time 10",
+            //RunProcess(string.Format("-i {0}{1} -async 1 -threads 0 -acodec aac -strict -2 -cutoff 15000 -ac 2 -ab 256k -vcodec libx264 -preset ultrafast -tune zerolatency -threads 2 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 5 -hls_wrap 12 {1}.m3u8 -segment_format mpegts -segment_list_flags +live -segment_time 10",
+            //    $"http://{_config.AnyseeIp}:8080/chlist/", channel));
+
+            try
+            {
+                var parameters = string.Format(
+                    "-i {0}{1} -async 1 -threads 0 -acodec aac -strict -2 -cutoff 15000 -ac 2 -ab 256k -vcodec libx264 -preset ultrafast -tune zerolatency -threads 2 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 5 -hls_wrap 12 {1}.m3u8 -segment_format mpegts -segment_list_flags +live -segment_time 10",
+                    $"http://{_config.AnyseeIp}:8080/chlist/", channel);
+
+                var oInfo = new ProcessStartInfo(_config.FfmpegExe, parameters)
+                {
+                    WorkingDirectory = _config.SegmentPath,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = false,
+                    RedirectStandardError = false
+                };
+
+                _logger.LogInformation("Starting FFMPEG");
+                _logger.LogDebug($"{oInfo.FileName} {oInfo.Arguments}");
+
+                _transcodingProc = Process.Start(oInfo);
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Error starting FFMPEG process");
+            }
         }
 
         public Task StartAsync(CancellationToken cancellationToken)
