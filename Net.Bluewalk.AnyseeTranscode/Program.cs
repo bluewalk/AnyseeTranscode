@@ -23,10 +23,9 @@ namespace Net.Bluewalk.AnyseeTranscode
 
             Log.Logger = new LoggerConfiguration()
                 .Enrich.FromLogContext()
-                .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
                 .MinimumLevel.Debug()
-                .WriteTo.Console(
-                    EnvironmentExtensions.GetEnvironmentVariable("LOG_LEVEL", LogEventLevel.Information),
+                .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+                .WriteTo.Console(EnvironmentExtensions.GetEnvironmentVariable("LOG_LEVEL", LogEventLevel.Information),
                     "{Timestamp:yyyy-MM-dd HH:mm:ss zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}",
                     theme: AnsiConsoleTheme.Code
                 ).CreateLogger();
@@ -34,32 +33,13 @@ namespace Net.Bluewalk.AnyseeTranscode
             AppDomain.CurrentDomain.DomainUnload += (sender, eventArgs) => Log.CloseAndFlush();
 
             var builder = new HostBuilder()
-                .ConfigureAppConfiguration((hostingContext, config) =>
-                {
-                    config.AddEnvironmentVariables();
-
-                    if (File.Exists("config.json"))
-                        config.AddJsonFile("config.json", false, true);
-
-                    if (args != null)
-                    {
-                        config.AddCommandLine(args);
-                    }
-                })
                 .ConfigureServices((hostContext, services) =>
                 {
                     services.AddOptions();
 
-                    //services.Replace(ServiceDescriptor.Singleton(typeof(ILogger<>), typeof(DateTimeLogger<>)));
-
-                    //services.Configure<Config>(hostContext.Configuration.GetSection("Config"));
-
                     services.AddSingleton<IHostedService, Logic>();
                 })
-                .ConfigureLogging((hostingContext, logging) => {
-                    logging.AddConfiguration(hostingContext.Configuration.GetSection("Logging"));
-                    logging.AddConsole();
-                });
+                .UseSerilog();
 
             await builder.RunConsoleAsync();
         }
