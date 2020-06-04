@@ -55,7 +55,7 @@ namespace Net.Bluewalk.AnyseeTranscode
         {
             var requestFile = Path.Combine(_config.SegmentPath,
                 Path.GetFileName(arg.Request.RawUrlWithoutQuery));
-            
+
             if (File.Exists(requestFile))
             {
                 _lastAccess = DateTime.Now;
@@ -128,7 +128,7 @@ namespace Net.Bluewalk.AnyseeTranscode
             _lastAccess = DateTime.Now;
             _tmrAutoStop.Start();
         }
-        
+
         private async Task Server_Channels(HttpContext arg)
         {
             var result = new List<object>();
@@ -137,20 +137,22 @@ namespace Net.Bluewalk.AnyseeTranscode
             m3u.Medias.ToList().ForEach(m =>
             {
                 var title = Regex.Match(m.Title.InnerTitle, @"(?<channel>[0-9]+)\(cab\)\.(?<name>[A-Za-z0-9_]+)");
+                var channelId = m.MediaFile.Split('/').Last();
 
                 result.Add(new
                 {
                     Channel = Convert.ToInt32(title.Groups["channel"].Value ?? "-1"),
                     Name = title.Groups["name"].Value?.Replace("_", " ").Trim(),
-                    Id = m.MediaFile.Split('/').Last(),
+                    Id = channelId,
                     Encrypted = m.Title.InnerTitle.EndsWith("_$"),
-                    Url = $"{_config.UrlPrefix}/channel/{m.MediaFile.Split('/').Last()}"
+                    DirectUrl = $"http://{_config.AnyseeIp}:8080/chlist/{channelId}",
+                    TranscodeUrl = $"{_config.UrlPrefix}/channel/{channelId}"
                 });
             });
 
             await arg.Response.SendJson(result);
         }
-        
+
         private async Task Server_Stats(HttpContext arg)
         {
             await arg.Response.SendJson(_httpServer.Stats);
@@ -204,7 +206,7 @@ namespace Net.Bluewalk.AnyseeTranscode
             }
         }
 
-        
+
         private void Transcode(string channel)
         {
             KillTranscoding();
