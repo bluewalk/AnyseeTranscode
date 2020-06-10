@@ -216,7 +216,8 @@ namespace Net.Bluewalk.AnyseeTranscode
             try
             {
                 var parameters = string.Format(
-                    "-i {0}{1} -async 1 -threads 0 -acodec aac -strict -2 -cutoff 15000 -ac 2 -ab 256k -vcodec libx264 -preset ultrafast -tune zerolatency -threads 2 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 5 -hls_wrap 12 {1}.m3u8 -segment_format mpegts -segment_list_flags +live -segment_time 10",
+                    //"-i {0}{1} -async 1 -threads 2 -acodec aac -strict -2 -cutoff 16000 -ac 2 -ab 256k -vcodec libx264 -preset ultrafast -tune zerolatency -threads 2 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 5 -hls_wrap 12 {1}.m3u8 -segment_format mpegts -segment_list_flags +live -segment_time 10",
+                    "-i {0}{1} -y -c:a copy -c:v libx264 -b:v 8M -profile:v high -preset ultrafast -bufsize 8M -map 0:0 -map 0:1 -hls_time 5 -hls_wrap 12 {1}.m3u8 -segment_format mpegts -segment_list_flags +live -segment_time 10",
                     $"http://{_config.AnyseeIp}:8080/chlist/", channel);
 
                 var sInfo = new ProcessStartInfo(_config.FfmpegExe, parameters)
