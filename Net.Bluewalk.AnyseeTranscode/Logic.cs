@@ -112,7 +112,7 @@ namespace Net.Bluewalk.AnyseeTranscode
                 Transcode(channel);
             }
 
-            while (!File.Exists(Path.Combine(_config.SegmentPath, channel + ".m3u8")) && !_transcodingProcess.HasExited)
+            while (!File.Exists(Path.Combine(_config.SegmentPath, channel + ".m3u8")) && _transcodingProcess?.HasExited == false)
                 Thread.Sleep(1000);
 
             if (_transcodingProcess.HasExited)
@@ -219,19 +219,30 @@ namespace Net.Bluewalk.AnyseeTranscode
                     "-i {0}{1} -async 1 -threads 0 -acodec aac -strict -2 -cutoff 15000 -ac 2 -ab 256k -vcodec libx264 -preset ultrafast -tune zerolatency -threads 2 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 5 -hls_wrap 12 {1}.m3u8 -segment_format mpegts -segment_list_flags +live -segment_time 10",
                     $"http://{_config.AnyseeIp}:8080/chlist/", channel);
 
-                var oInfo = new ProcessStartInfo(_config.FfmpegExe, parameters)
+                var sInfo = new ProcessStartInfo(_config.FfmpegExe, parameters)
                 {
                     WorkingDirectory = _config.SegmentPath,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = false,
-                    RedirectStandardError = false
+                    RedirectStandardError = true
                 };
 
-                _logger.LogInformation("Starting FFMPEG");
-                _logger.LogDebug($"{oInfo.FileName} {oInfo.Arguments}");
+                _transcodingProcess = new Process()
+                {
+                    StartInfo = sInfo,
+                    EnableRaisingEvents = true
+                };
+                _transcodingProcess.ErrorDataReceived += (sender, args) => _logger.LogDebug($"FFMPEG: {args.Data}");
 
-                _transcodingProcess = Process.Start(oInfo);
+                _logger.LogInformation("Starting FFMPEG");
+                _logger.LogDebug($"{sInfo.FileName} {sInfo.Arguments}");
+
+                if (_transcodingProcess.Start())
+                {
+                    _logger.LogInformation("FFMPEG started, transcoding");
+                    _transcodingProcess.BeginErrorReadLine();
+                }
             }
             catch (Exception e)
             {
