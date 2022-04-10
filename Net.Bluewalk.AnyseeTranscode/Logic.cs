@@ -141,18 +141,20 @@ namespace Net.Bluewalk.AnyseeTranscode
 
         private async Task Server_Channels(HttpContext arg)
         {
-            var result = new M3UPlaylist();
-
-            var m3u = await GetChannelM3U();
-            m3u.Medias.ToList().ForEach(m =>
+            try
             {
-                var title = Regex.Match(m.Title.InnerTitle, @"(?<channel>[0-9]+)\(cab\)\.(?<name>[A-Za-z0-9_]+)");
-                var channelId = m.MediaFile.Split('/').Last();
+                var result = new M3UPlaylist();
 
-                result.Add(new M3UPlaylistEntry()
+                var m3u = await GetChannelM3U();
+                m3u.Medias.ToList().ForEach(m =>
                 {
-                    Title = title.Groups["name"].Value?.Replace("_", " ").Trim(),
-                    Url = new Uri($"{_config.UrlPrefix}/channel/{channelId}")
+                    var title = Regex.Match(m.Title.InnerTitle, @"(?<channel>[0-9]+)\(cab\)\.(?<name>[A-Za-z0-9_]+)");
+                    var channelId = m.MediaFile.Split('/').Last();
+
+                    result.Add(new M3UPlaylistEntry()
+                    {
+                        Title = title.Groups["name"].Value?.Replace("_", " ").Trim(),
+                        Url = new Uri($"{_config.UrlPrefix}/channel/{channelId}")
 
                     //Channel = Convert.ToInt32(title.Groups["channel"].Value ?? "-1"),
                     //Name = title.Groups["name"].Value?.Replace("_", " ").Trim(),
@@ -161,16 +163,21 @@ namespace Net.Bluewalk.AnyseeTranscode
                     //DirectUrl = $"http://{_config.AnyseeIp}:8080/chlist/{channelId}",
                     //TranscodeUrl = $"{_config.UrlPrefix}/channel/{channelId}"
                 });
-            });
+                });
 
-            if (arg.Request.Headers["Accept"] == ContentTypeJson)
-                await arg.Response.SendJson(result);
-            else
+                if (arg.Request.Headers["Accept"] == ContentTypeJson)
+                    await arg.Response.SendJson(result);
+                else
+                {
+                    arg.Response.ContentType = ContentTypePlaylist;
+                    arg.Response.Headers["Content-Disposition"] = "attachment; filename=playlist.m3u8";
+
+                    await arg.Response.Send(Encoding.UTF8.GetBytes(result?.ToString()));
+                }
+            }
+            catch (Exception ex)
             {
-                arg.Response.ContentType = ContentTypePlaylist;
-                arg.Response.Headers["Content-Disposition"] = "attachment; filename=playlist.m3u8";
-
-                await arg.Response.Send(Encoding.UTF8.GetBytes(result?.ToString()));
+                _logger.LogError(ex, "Error creating channel playlist");
             }
         }
 
