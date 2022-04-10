@@ -21,6 +21,7 @@ RUN apk add --no-cache ffmpeg icu-libs
 WORKDIR /app
 COPY --from=publish /app/out ./
 
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 ENV ASPNETCORE_URLS=http://+:80
 
 EXPOSE 80
