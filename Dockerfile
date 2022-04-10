@@ -1,5 +1,5 @@
 # STAGE01 - Build application and its dependencies
-FROM mcr.microsoft.com/dotnet/core/sdk:3.1-alpine AS build
+FROM mcr.microsoft.com/dotnet/sdk:6.0-alpine AS build
 WORKDIR /app
 
 COPY . ./
@@ -12,7 +12,7 @@ RUN dotnet publish -c Release -o ../out
 RUN rm ../out/*.pdb
 
 # STAGE03 - Create the final image
-FROM mcr.microsoft.com/dotnet/core/aspnet:3.1-alpine AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:6.0-alpine AS runtime
 LABEL Description="Anysee Transcode" \
       Maintainer="Bluewalk"
 
@@ -20,5 +20,11 @@ RUN apk add --no-cache ffmpeg
 
 WORKDIR /app
 COPY --from=publish /app/out ./
+
+ENV ASPNETCORE_URLS=http://+:80
+
+EXPOSE 80
+
+HEALTHCHECK CMD curl -sS http://localhost/status || exit 1
 
 CMD ["dotnet", "Net.Bluewalk.AnyseeTranscode.dll"]

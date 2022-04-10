@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,11 @@ namespace Net.Bluewalk.AnyseeTranscode
 {
     public class Logic : IHostedService
     {
+        private const string ContentTypeJson = "application/json";
+        private const string ContentTypePlaylist = "application/x-mpegURL";
+        private const string ContentTypeVideo = "video/mp2t";
+        private const string ContentTypeOctetStream = "application/octet-stream";
+
         private readonly ILogger<Logic> _logger;
         private Server _httpServer;
         private Process _transcodingProcess;
@@ -53,8 +59,11 @@ namespace Net.Bluewalk.AnyseeTranscode
 
         private async Task Server_Stream(HttpContext arg)
         {
+            //    var requestFile = Path.Combine(_config.SegmentPath,
+            //        Path.GetFileName(arg.Request.RawUrlWithoutQuery));
+
             var requestFile = Path.Combine(_config.SegmentPath,
-                Path.GetFileName(arg.Request.RawUrlWithoutQuery));
+                Path.GetFileName(arg.Request.Url.RawWithoutQuery));
 
             if (File.Exists(requestFile))
             {
@@ -64,13 +73,13 @@ namespace Net.Bluewalk.AnyseeTranscode
                 switch (Path.GetExtension(requestFile).ToUpper())
                 {
                     case ".M3U8":
-                        arg.Response.ContentType = "application/x-mpegURL";
+                        arg.Response.ContentType = ContentTypePlaylist;
                         break;
                     case ".TS":
-                        arg.Response.ContentType = "video/mp2t";
+                        arg.Response.ContentType = ContentTypeVideo;
                         break;
                     default:
-                        arg.Response.ContentType = "application/octet-stream";
+                        arg.Response.ContentType = ContentTypeOctetStream;
                         break;
                 }
 
@@ -99,7 +108,8 @@ namespace Net.Bluewalk.AnyseeTranscode
 
         private async Task Server_Channel(HttpContext arg)
         {
-            var channel = arg.Request.RawUrlEntries.LastOrDefault();
+            //var channel = arg.Request.RawUrlEntries.LastOrDefault();
+            var channel = arg.Request.Url.Elements.LastOrDefault();
             if (channel == null)
             {
                 await arg.Response.NotFound();
@@ -131,7 +141,7 @@ namespace Net.Bluewalk.AnyseeTranscode
 
         private async Task Server_Channels(HttpContext arg)
         {
-            var result = new List<object>();
+            var result = new M3UPlaylist();
 
             var m3u = await GetChannelM3U();
             m3u.Medias.ToList().ForEach(m =>
@@ -139,23 +149,34 @@ namespace Net.Bluewalk.AnyseeTranscode
                 var title = Regex.Match(m.Title.InnerTitle, @"(?<channel>[0-9]+)\(cab\)\.(?<name>[A-Za-z0-9_]+)");
                 var channelId = m.MediaFile.Split('/').Last();
 
-                result.Add(new
+                result.Add(new M3UPlaylistEntry()
                 {
-                    Channel = Convert.ToInt32(title.Groups["channel"].Value ?? "-1"),
-                    Name = title.Groups["name"].Value?.Replace("_", " ").Trim(),
-                    Id = channelId,
-                    Encrypted = m.Title.InnerTitle.EndsWith("_$"),
-                    DirectUrl = $"http://{_config.AnyseeIp}:8080/chlist/{channelId}",
-                    TranscodeUrl = $"{_config.UrlPrefix}/channel/{channelId}"
+                    Title = title.Groups["name"].Value?.Replace("_", " ").Trim(),
+                    Url = new Uri($"{_config.UrlPrefix}/channel/{channelId}")
+
+                    //Channel = Convert.ToInt32(title.Groups["channel"].Value ?? "-1"),
+                    //Name = title.Groups["name"].Value?.Replace("_", " ").Trim(),
+                    //Id = channelId,
+                    //Encrypted = m.Title.InnerTitle.EndsWith("_$"),
+                    //DirectUrl = $"http://{_config.AnyseeIp}:8080/chlist/{channelId}",
+                    //TranscodeUrl = $"{_config.UrlPrefix}/channel/{channelId}"
                 });
             });
 
-            await arg.Response.SendJson(result);
+            if (arg.Request.Headers["Accept"] == ContentTypeJson)
+                await arg.Response.SendJson(result);
+            else
+            {
+                arg.Response.ContentType = ContentTypePlaylist;
+                arg.Response.Headers["Content-Disposition"] = "attachment; filename=playlist.m3u8";
+
+                await arg.Response.Send(Encoding.UTF8.GetBytes(result?.ToString()));
+            }
         }
 
-        private async Task Server_Stats(HttpContext arg)
+        private async Task Server_Status(HttpContext arg)
         {
-            await arg.Response.SendJson(_httpServer.Stats);
+            await arg.Response.SendJson(_httpServer.Statistics);
         }
 
         #endregion
@@ -259,26 +280,26 @@ namespace Net.Bluewalk.AnyseeTranscode
         public Task StartAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation("Starting webserver");
-            _httpServer = new Server("+", _config.HttpPort, false,
-                Server_DefaultRoute)
-            {
-                AccessControl =
-                {
-                    Mode = AccessControlMode.DefaultPermit
-                }
-            };
-            _httpServer.DynamicRoutes.Add(HttpMethod.GET, new Regex("^/channel/\\d+$"), Server_Channel);
-            _httpServer.DynamicRoutes.Add(HttpMethod.GET, new Regex("^/stream/*.*$"), Server_Stream);
-            _httpServer.StaticRoutes.Add(HttpMethod.GET, "/stop", Server_Stop);
-            _httpServer.StaticRoutes.Add(HttpMethod.GET, "/channels", Server_Channels);
-            _httpServer.StaticRoutes.Add(HttpMethod.GET, "/stats", Server_Stats);
-            _logger.LogInformation("Webserver running at port {0}", _config.HttpPort);
+            _httpServer = new Server("+", 80, false, Server_DefaultRoute);
+            _httpServer.Settings.AccessControl.Mode = AccessControlMode.DefaultPermit;
+
+            _httpServer.Routes.Dynamic.Add(HttpMethod.GET, new Regex("^/channel/\\d+$"), Server_Channel);
+            _httpServer.Routes.Dynamic.Add(HttpMethod.GET, new Regex("^/stream/*.*$"), Server_Stream);
+            _httpServer.Routes.Static.Add(HttpMethod.GET, "/stop", Server_Stop);
+            _httpServer.Routes.Static.Add(HttpMethod.GET, "/channels", Server_Channels);
+            _httpServer.Routes.Static.Add(HttpMethod.GET, "/status", Server_Status);
+
+            _httpServer.Start();
+
+            _logger.LogInformation("Webserver running at port {0}", 80);
 
             return Task.FromResult(true);
         }
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
+            _httpServer.Stop();
+
             if (_transcodingProcess != null)
                 KillTranscoding();
 

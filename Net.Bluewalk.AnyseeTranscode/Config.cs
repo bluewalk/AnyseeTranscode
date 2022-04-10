@@ -4,11 +4,8 @@ namespace Net.Bluewalk.AnyseeTranscode
 {
     public class Config
     {
-        [EnvironmentVariable(Name = "ANYSEE_IP", Default = "192.168.1.10")]
+        [EnvironmentVariable(Name = "ANYSEE_IP", Default = "192.168.1.30")]
         public string AnyseeIp { get; set; }
-
-        [EnvironmentVariable(Name = "HTTP_PORT", Default = 8080)]
-        public int HttpPort { get; set; }
 
         [EnvironmentVariable(Name = "URL_PREFIX", Default = "http://localhost:8080")]
         public string UrlPrefix { get; set; }
