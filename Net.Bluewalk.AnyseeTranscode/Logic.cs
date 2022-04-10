@@ -148,21 +148,23 @@ namespace Net.Bluewalk.AnyseeTranscode
                 var m3u = await GetChannelM3U();
                 m3u.Medias.ToList().ForEach(m =>
                 {
-                    var title = Regex.Match(m.Title.InnerTitle, @"(?<channel>[0-9]+)\(cab\)\.(?<name>[A-Za-z0-9_]+)");
+                    var titleRegexMatches = Regex.Match(m.Title.InnerTitle, @"(?<channel>[0-9]+)\(cab\)\.(?<name>[A-Za-z0-9_]+)");
+                    var title = titleRegexMatches.Groups["name"].Value?.Replace("_", " ").Trim();
                     var channelId = m.MediaFile.Split('/').Last();
 
                     result.Add(new M3UPlaylistEntry()
                     {
-                        Title = title.Groups["name"].Value?.Replace("_", " ").Trim(),
-                        Url = new Uri($"{_config.UrlPrefix}/channel/{channelId}")
+                        Title = $"{channelId}_{title}",
+                        Url = new Uri($"{_config.UrlPrefix}/channel/{channelId}"),
+                        TvgName = title
 
-                    //Channel = Convert.ToInt32(title.Groups["channel"].Value ?? "-1"),
-                    //Name = title.Groups["name"].Value?.Replace("_", " ").Trim(),
-                    //Id = channelId,
-                    //Encrypted = m.Title.InnerTitle.EndsWith("_$"),
-                    //DirectUrl = $"http://{_config.AnyseeIp}:8080/chlist/{channelId}",
-                    //TranscodeUrl = $"{_config.UrlPrefix}/channel/{channelId}"
-                });
+                        //Channel = Convert.ToInt32(title.Groups["channel"].Value ?? "-1"),
+                        //Name = title.Groups["name"].Value?.Replace("_", " ").Trim(),
+                        //Id = channelId,
+                        //Encrypted = m.Title.InnerTitle.EndsWith("_$"),
+                        //DirectUrl = $"http://{_config.AnyseeIp}:8080/chlist/{channelId}",
+                        //TranscodeUrl = $"{_config.UrlPrefix}/channel/{channelId}"
+                    });
                 });
 
                 if (arg.Request.HeaderExists("Accept", false) && arg.Request.Headers["Accept"] == ContentTypeJson)
