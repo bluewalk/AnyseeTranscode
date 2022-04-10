@@ -150,11 +150,12 @@ namespace Net.Bluewalk.AnyseeTranscode
                 {
                     var titleRegexMatches = Regex.Match(m.Title.InnerTitle, @"(?<channel>[0-9]+)\(cab\)\.(?<name>[A-Za-z0-9_]+)");
                     var title = titleRegexMatches.Groups["name"].Value?.Replace("_", " ").Trim();
+                    var channelNumber = titleRegexMatches.Groups["channel"].Value;
                     var channelId = m.MediaFile.Split('/').Last();
 
                     result.Add(new M3UPlaylistEntry()
                     {
-                        Title = $"{channelId}_{title}",
+                        Title = $"{channelNumber}_{title}",
                         Url = new Uri($"{_config.UrlPrefix}/channel/{channelId}"),
                         TvgName = title
 
