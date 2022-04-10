@@ -165,7 +165,7 @@ namespace Net.Bluewalk.AnyseeTranscode
                 });
                 });
 
-                if (arg.Request.Headers["Accept"] == ContentTypeJson)
+                if (arg.Request.HeaderExists("Accept", false) && arg.Request.Headers["Accept"] == ContentTypeJson)
                     await arg.Response.SendJson(result);
                 else
                 {
