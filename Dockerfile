@@ -16,7 +16,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:6.0-alpine AS runtime
 LABEL Description="Anysee Transcode" \
       Maintainer="Bluewalk"
 
-RUN apk add --no-cache ffmpeg icu-libs
+RUN apk add --no-cache ffmpeg icu-libs curl
 
 WORKDIR /app
 COPY --from=publish /app/out ./
