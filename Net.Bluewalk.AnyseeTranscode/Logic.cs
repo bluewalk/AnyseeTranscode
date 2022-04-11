@@ -62,26 +62,19 @@ namespace Net.Bluewalk.AnyseeTranscode
             //    var requestFile = Path.Combine(_config.SegmentPath,
             //        Path.GetFileName(arg.Request.RawUrlWithoutQuery));
 
-            var requestFile = Path.Combine(_config.SegmentPath,
-                Path.GetFileName(arg.Request.Url.RawWithoutQuery));
+            var requestFile = Path.Combine(_config.SegmentPath, Path.GetFileName(arg.Request.Url.RawWithoutQuery));
 
             if (File.Exists(requestFile))
             {
                 _lastAccess = DateTime.Now;
                 _logger.LogDebug("Serving {0}", requestFile);
 
-                switch (Path.GetExtension(requestFile).ToUpper())
+                arg.Response.ContentType = Path.GetExtension(requestFile).ToUpper() switch
                 {
-                    case ".M3U8":
-                        arg.Response.ContentType = ContentTypePlaylist;
-                        break;
-                    case ".TS":
-                        arg.Response.ContentType = ContentTypeVideo;
-                        break;
-                    default:
-                        arg.Response.ContentType = ContentTypeOctetStream;
-                        break;
-                }
+                    ".M3U8" => ContentTypePlaylist,
+                    ".TS" => ContentTypeVideo,
+                    _ => ContentTypeOctetStream
+                };
 
                 try
                 {
@@ -108,7 +101,6 @@ namespace Net.Bluewalk.AnyseeTranscode
 
         private async Task Server_Channel(HttpContext arg)
         {
-            //var channel = arg.Request.RawUrlEntries.LastOrDefault();
             var channel = arg.Request.Url.Elements.LastOrDefault();
             if (channel == null)
             {
@@ -125,7 +117,7 @@ namespace Net.Bluewalk.AnyseeTranscode
             while (!File.Exists(Path.Combine(_config.SegmentPath, channel + ".m3u8")) && _transcodingProcess?.HasExited == false)
                 Thread.Sleep(1000);
 
-            if (_transcodingProcess.HasExited)
+            if (_transcodingProcess?.HasExited == true)
             {
                 await arg.Response.Error(500, "Error transcoding stream");
                 return;
@@ -204,7 +196,10 @@ namespace Net.Bluewalk.AnyseeTranscode
 
                     f.Delete();
                 }
-                catch { }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Error cleaning up {file}", f);
+                }
             }
         }
 
@@ -242,13 +237,11 @@ namespace Net.Bluewalk.AnyseeTranscode
         {
             KillTranscoding();
 
-            _logger.LogInformation("Start transcoding channel {0}", channel);
+            _logger.LogInformation("Start transcoding channel {channel}", channel);
 
             try
             {
-                var parameters = string.Format(
-                    "-i {0}{1} -async 1 -threads 0 -acodec aac -strict -2 -cutoff 15000 -ac 2 -ab 256k -vcodec libx264 -preset ultrafast -tune zerolatency -threads 2 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 5 -hls_wrap 12 {1}.m3u8 -segment_format mpegts -segment_list_flags +live -segment_time 10",
-                    $"http://{_config.AnyseeIp}:8080/chlist/", channel);
+                var parameters = $"-i http://{_config.AnyseeIp}:8080/chlist/{channel} {_config.FfmpegParams.Replace("[CHANNEL]", channel)}";
 
                 var sInfo = new ProcessStartInfo(_config.FfmpegExe, parameters)
                 {
@@ -264,6 +257,7 @@ namespace Net.Bluewalk.AnyseeTranscode
                     StartInfo = sInfo,
                     EnableRaisingEvents = true
                 };
+
                 _transcodingProcess.ErrorDataReceived += (sender, args) => _logger.LogDebug($"FFMPEG: {args.Data}");
 
                 _logger.LogInformation("Starting FFMPEG");
@@ -282,7 +276,7 @@ namespace Net.Bluewalk.AnyseeTranscode
         }
         #endregion
 
-        public async Task<Extm3u> GetChannelM3U(bool reload = false)
+        public async Task<Extm3u> GetChannelM3U()
         {
             return _m3u ??= await M3U.ParseFromUrlAsync($"http://{_config.AnyseeIp}/n7_tv_chlist.m3u");
         }

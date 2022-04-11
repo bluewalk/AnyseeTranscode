@@ -13,6 +13,9 @@ namespace Net.Bluewalk.AnyseeTranscode
         [EnvironmentVariable(Name = "FFMPEG_EXE",  Default = "ffmpeg")]
         public string FfmpegExe { get; set; }
 
+        [EnvironmentVariable(Name ="FFMPEG_PARAMS", Default = "-async 1 -threads 0 -acodec aac -strict -2 -cutoff 15000 -ac 2 -ab 256k -vcodec libx264 -preset ultrafast -tune zerolatency -threads 2 -flags -global_header -fflags +genpts -map 0:0 -map 0:1 -hls_time 5 -hls_wrap 12 [CHANNEL].m3u8 -segment_format mpegts -segment_list_flags +live -segment_time 10")]
+        public string FfmpegParams { get; set; }
+
         [EnvironmentVariable(Name = "SEGMENT_PATH", Default = "/tmp")]
         public string SegmentPath { get; set; }
     }
